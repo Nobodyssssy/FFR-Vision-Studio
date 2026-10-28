@@ -145,4 +145,43 @@ class Downloads(unittest.TestCase):
         self.assertFalse((self.root / 'data/ffbe/sprites/100').exists())
 
 
+    def test_interrupted_download_resumes_and_reuses_cache(self):
+        content = b"FFBE original animation and audio" * 500
+        info = self.info("resume.bin", content)
+        target = self.root / "downloads" / "resume.bin"
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        offset = 2000
+        partial = target.with_name(
+            f"{target.name}.{info['sha256']}.advanced-part"
+        )
+        partial.write_bytes(content[:offset])
+
+        requests = []
+
+        def fake_urlopen(request, timeout=45):
+            byte_range = request.get_header("Range")
+            requests.append(byte_range)
+            self.assertEqual(byte_range, f"bytes={offset}-")
+
+            response = io.BytesIO(content[offset:])
+            response.status = 206
+            response.headers = {
+                "Content-Range": (
+                    f"bytes {offset}-{len(content)-1}/{len(content)}"
+                )
+            }
+            return response
+
+        with patch.object(assets, "urlopen", side_effect=fake_urlopen):
+            assets.download(info, target, lambda **kw: None)
+            self.assertEqual(target.read_bytes(), content)
+            self.assertFalse(partial.exists())
+
+            # Second download must use the verified cache.
+            assets.download(info, target, lambda **kw: None)
+
+        self.assertEqual(requests, [f"bytes={offset}-"])
+
+
 if __name__ == '__main__': unittest.main()

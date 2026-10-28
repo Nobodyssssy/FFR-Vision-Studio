@@ -35,44 +35,109 @@ def preview_file(form, kind):
     return path if path.is_file() else None
 
 
+
 def download(info, target, report):
-    digest = info.get('sha256', '')
-    if not re.fullmatch(r'[a-f0-9]{64}', digest):
-        raise ValueError('The download catalog has an invalid checksum. Restart Studio to refresh it.')
+    """Download once, resume interruptions, and verify before publishing."""
+    from http.client import IncompleteRead
+
+    digest = info.get("sha256", "")
+    expected = info.get("size")
+
+    if (not re.fullmatch(r"[a-f0-9]{64}", digest)
+            or type(expected) is not int or expected < 0):
+        raise ValueError("Invalid download checksum or size.")
+
+    target = Path(target)
+
     def matches(path):
-        if not path.is_file() or path.stat().st_size != info['size']:
+        if not path.is_file() or path.stat().st_size != expected:
             return False
-        with path.open('rb') as f:
-            return hashlib.file_digest(f, 'sha256').hexdigest() == digest
+        with path.open("rb") as stream:
+            return hashlib.file_digest(stream, "sha256").hexdigest() == digest
+
     if matches(target):
         return target
-    base = os.environ.get('FFR_STUDIO_HOST', 'https://ffbe.luminest.io/')
-    url = urljoin(base, info['url'])
+
+    base = os.environ.get("FFR_STUDIO_HOST", "https://ffbe.luminest.io/")
+    url = urljoin(base, info["url"])
     target.parent.mkdir(parents=True, exist_ok=True)
-    partial = target.with_name(target.name + '.' + uuid.uuid4().hex + '.advanced-part')
+
+    # Stable filename: survives errors, restarts and future attempts.
+    partial = target.with_name(f"{target.name}.{digest}.advanced-part")
+
     for attempt in range(6):
-        try:
-            with urlopen(Request(url, headers={'Accept-Encoding': 'identity'}), timeout=45) as r, partial.open('wb') as out:
-                size = 0
-                while chunk := r.read(131072):
-                    out.write(chunk); size += len(chunk)
-                    if size > info['size']:
-                        raise ValueError('Downloaded file is larger than its catalog entry.')
-                    report(received=size, total=info['size'])
-            if not matches(partial):
-                raise ValueError('Download checksum did not match. Retry the import.')
+        offset = partial.stat().st_size if partial.is_file() else 0
+
+        if offset == expected and matches(partial):
             partial.replace(target)
             return target
-        except (OSError, URLError, ValueError) as ex:
-            if attempt == 5 or isinstance(ex, HTTPError) and ex.code not in (408, 429, 500, 502, 503, 504):
-                raise ValueError(f'Could not download unit assets: {ex}') from ex
-            wait = min(30, 2 ** (attempt + 1))
-            if isinstance(ex, HTTPError) and ex.headers.get('Retry-After', '').isdigit():
-                wait = min(60, int(ex.headers['Retry-After']))
-            report(stage=f'Download interrupted; retrying in {wait} seconds', received=0, total=0)
-            time.sleep(wait)
-        finally:
+
+        if offset >= expected:
             partial.unlink(missing_ok=True)
+            offset = 0
+
+        headers = {"Accept-Encoding": "identity"}
+        if offset:
+            headers["Range"] = f"bytes={offset}-"
+
+        try:
+            with urlopen(Request(url, headers=headers), timeout=45) as response:
+                status = response.status
+
+                if offset and status == 206:
+                    match = re.fullmatch(
+                        r"bytes (\d+)-(\d+)/(\d+)",
+                        response.headers.get("Content-Range", "")
+                    )
+                    if (not match or int(match[1]) != offset
+                            or int(match[3]) != expected):
+                        partial.unlink(missing_ok=True)
+                        raise ValueError("Server returned an invalid byte range.")
+
+                elif status == 200:
+                    # Server ignored Range: restart safely, without duplicating bytes.
+                    offset = 0
+                else:
+                    raise ValueError(f"Unexpected download status: {status}")
+
+                received = offset
+                with partial.open("ab" if offset else "wb") as output:
+                    while chunk := response.read(131072):
+                        if received + len(chunk) > expected:
+                            raise ValueError("Download exceeds expected size.")
+                        output.write(chunk)
+                        received += len(chunk)
+                        report(received=received, total=expected)
+
+            if received != expected:
+                raise OSError("Download ended before all bytes arrived.")
+
+            if not matches(partial):
+                partial.unlink(missing_ok=True)
+                raise ValueError("Download checksum mismatch.")
+
+            partial.replace(target)
+            return target
+
+        except (HTTPError, URLError, OSError, ValueError, IncompleteRead) as error:
+            if isinstance(error, HTTPError):
+                if error.code not in (408, 416, 429, 500, 502, 503, 504):
+                    raise ValueError(f"Download failed: HTTP {error.code}") from error
+                if error.code == 416:
+                    partial.unlink(missing_ok=True)
+
+            if attempt == 5:
+                raise ValueError(f"Download failed after retries: {error}") from error
+
+            wait = min(30, 2 ** (attempt + 1))
+            if isinstance(error, HTTPError):
+                retry_after = error.headers.get("Retry-After", "")
+                if retry_after.isdigit():
+                    wait = min(60, int(retry_after))
+
+            report(stage="Download interrupted; resuming", received=offset, total=expected)
+            time.sleep(wait)
+
 
 
 def ensure_form(form, info, report):
