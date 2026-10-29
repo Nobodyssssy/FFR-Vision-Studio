@@ -230,13 +230,9 @@ def convert(doc, out, name, scale=None, fps_out=60, max_units=MAX_SPRITE_UNITS, 
     first_cell = next(iter(cell_names.values()))
     setup_parts = {"root": {"Hide": [[0, 0.0]]}}
     for pn in slot_names.values(): setup_parts[pn] = {"Cell": [[0, first_cell]], "Posz": [[0, 1.0]], "Sclx": [[0, 1.0]], "Scly": [[0, 1.0]], "Hide": [[0, 1.0]]}
-    # FFR overrides only the no-parts-color additive material with an emissive
-    # boost. An identity Mul color chooses stock SS6 AddMul without changing
-    # texture RGB or the animated Alpha. Setup initializes every playback frame.
-    for (blend, _), pn in slot_names.items():
-        if blend == "add":
-            setup_parts[pn]["PartsColor"] = [[0, {"target": "Whole", "blendType": "Mul",
-                                                "rgba": [255, 255, 255, 255], "rate": 1.0}]]
+    # FFR/ffr-dt compatibility: keep native Add blend in model.parts,
+    # with source tint/boost already baked into atlas cells and Alpha keys.
+    # Do not write object-valued Setup PartsColor until ffr-dt supports it.
     spec = {"pixelSize": [float(W), float(H)], "cells": cells,
             "model": {"parts": model},
             # The source ordinal is encoded by model part index. The donor's
