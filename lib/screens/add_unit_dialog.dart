@@ -33,6 +33,30 @@ class _AddUnitDialogState extends State<AddUnitDialog> {
   String? downloadSize;
   String? err;
   int _pickSeq = 0;
+  
+  Map<String, dynamic>? assetPlan;
+int _planSeq = 0;
+
+Future<void> loadAssetPlan() async {
+  if (sel == null || form.isEmpty) return;
+  final request = ++_planSeq;
+  final query = Uri(queryParameters: {
+    'ffbeId': sel!['id'].toString(),
+    'form': form,
+  }).query;
+
+  try {
+    final result = await context.read<AppState>().api!
+        .get('/api/assets/plan?$query') as Map<String, dynamic>;
+    if (mounted && request == _planSeq) {
+      setState(() => assetPlan = result);
+    }
+  } catch (_) {
+    if (mounted && request == _planSeq) {
+      setState(() => assetPlan = null);
+    }
+  }
+}
 
   @override
   void initState() {
@@ -52,6 +76,8 @@ class _AddUnitDialogState extends State<AddUnitDialog> {
   Future<void> pick(Map<String, dynamic> u) async {
     if (busy) return;
     final seq = ++_pickSeq;
+	++_planSeq;
+assetPlan = null;
     setState(() { sel = u; detail = null; idlePreview = null; err = null; loadingAssets = true; });
     final app = context.read<AppState>();
     try {
@@ -65,6 +91,7 @@ class _AddUnitDialogState extends State<AddUnitDialog> {
       final f = plain.contains(preferred) ? preferred! : plain.isNotEmpty ? plain.last : prefer.isNotEmpty ? prefer.last : (preferred ?? u['id'] as String);
       setState(() { detail = d; form = f; idlePreview = app.idleFile(f); name.text = (d['name'] as String?) ?? (u['name'] as String? ?? ''); });
     } catch (e) {
+	loadAssetPlan();
       if (mounted && seq == _pickSeq) setState(() => err = e.toString());
     } finally {
       if (seq == _pickSeq && mounted) setState(() => loadingAssets = false);
@@ -76,6 +103,8 @@ class _AddUnitDialogState extends State<AddUnitDialog> {
     if (busy) return;
     final app = context.read<AppState>();
     setState(() { form = f; idlePreview = app.idleFile(f); err = null; });
+	assetPlan = null;
+loadAssetPlan();
   }
 
   @override
@@ -184,7 +213,22 @@ class _AddUnitDialogState extends State<AddUnitDialog> {
                   const SizedBox(height: 6),
                   LinearProgressIndicator(value: downloadFraction, color: Guide.blue),
                 ]),
-              )) else const Spacer(),
+             
+              )) else Expanded(
+                child: Text(
+                  assetPlan?['knownDownloadBytes'] is num
+                      ? ((assetPlan!['knownDownloadBytes'] as num) == 0
+                          ? 'Unit and audio cached'
+                          : 'Known download: ${((assetPlan!['knownDownloadBytes'] as num) / 1048576).toStringAsFixed(1)} MB') +
+                        (assetPlan!['additionalEffectsMayBeRequired'] == true
+                            ? ' · Effects may need more'
+                            : '')
+                      : 'Download estimate unavailable',
+                  style: Guide.small(),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
               GuideButton('Cancel', onPressed: busy ? null : () => Navigator.of(context).pop()),
               const SizedBox(width: 8),
               GoButton(busy ? 'Adding' : 'Add unit', color: Guide.blue, busy: busy, onPressed: detail == null || !hasPack || busy || loadingAssets ? null : () async {

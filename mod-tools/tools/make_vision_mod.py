@@ -651,7 +651,7 @@ def resonance_movement_settings(skill, presentation, *, fallback=False):
     explicit = skill.get('movement')
     if not presentation or presentation.get('sourcePlacement', {}).get('hostAdapter') != 'logical_rectangle_to_root_v1':
         return deepcopy(explicit)
-    if ffbe_presentation.ground_movement(presentation) is None and not presentation.get('reconstructionProfile', {}).get('attackDirector'):
+    if ffbe_presentation.ground_movement(presentation) is None and (not presentation.get('reconstructionProfile', {}).get('attackDirector') or presentation.get('sourceMovement') is None):
         return deepcopy(explicit)
     prepared = presentation.get('sourceMovement')
     error = 'Prepared ground movement requires consistent source-proxy offsets and scale'
@@ -776,7 +776,7 @@ def prepare_ffbe_resonance(u, s, sid, tbl, clones, sequences):
                    "rename": [["SEQ_Battle_440111_Cut_000", f"SEQ_Battle_{sid + 1}_Master"]]})
     sequences.append({"asset": dest, "plan": plan, "source": lb_source, "profile": resolved, "audio": bank,
                       "presentation": presentation, "donor": u['donor']})
-    for rel in ("Asset/Skill/DT_SkillAsset", "Asset/Skill/CDT_SkillAsset_Demo"):
+    for rel in ("Asset/Skill/DT_SkillAsset", "Asset/Skill/CDT_SkillAsset_Prod"):
         donor = row_by(rel, "ID", 440111)[0]
         for off in (1, 2):
             tbl(rel)["add"].append({"row": f"{s['jp']}_{off}", "cloneFrom": donor,
@@ -825,7 +825,7 @@ def prepare_native_camera_command(u, s, sid, tbl, clones, sequences):
                    'rename': [['SEQ_Battle_440111_Cut_000', f'SEQ_Battle_{seq_id}_Master']]})
     sequences.append({'asset': dest, 'plan': plan, 'audio': bank,
                       'presentation': presentation, 'donor': u['donor']})
-    for rel in ('Asset/Skill/DT_SkillAsset', 'Asset/Skill/CDT_SkillAsset_Demo'):
+    for rel in ('Asset/Skill/DT_SkillAsset', 'Asset/Skill/CDT_SkillAsset_Prod'):
         for off in (0, 1):
             tbl(rel)['add'].append({'row': f"{s['jp']}_{off}", 'cloneFrom': row_by(rel, 'ID', 440111)[0],
                 'set': {'ID': seq_id + off, 'LevelSequence': dest.replace('FFRS/Content/', '/Game/'),
@@ -920,12 +920,12 @@ def prepare_converted_command(u, s, sid, tbl, clones, sequences):
                    "rename":[["SEQ_Battle_440111_Cut_000", f"SEQ_Battle_{seq_id}_Master"]]})
     sequences.append({"asset":dest, "plan":plan, "profile":resolved, "audio":bank,
                       "presentation":presentation, "donor":u.get('donor')})
-    for rel in ("Asset/Skill/DT_SkillAsset", "Asset/Skill/CDT_SkillAsset_Demo"):
+    for rel in ("Asset/Skill/DT_SkillAsset", "Asset/Skill/CDT_SkillAsset_Prod"):
         donor = row_by(rel, "ID", 440111)[0]
         for off in (1,2):
             tbl(rel)["add"].append({"row":f"{s['jp']}_{off}", "cloneFrom":donor,
                 "set":{"ID":seq_id+off-1, "LevelSequence":dest.replace("FFRS/Content/", "/Game/"),
-                       "soundSequence":"None", "bChangeNearClipPlane":False}})
+                       "soundSequence": "None", "bChangeNearClipPlane":False}})
     recovery = settings.get('parameterVariationType') == 'Increase'
     damaging = settings.get('skillEffectType') == 'DamageAndRecovery' and not recovery
     hit = row_by("Battle/Sequencer/DT_BtlHitEffectData", "ID", 210030 if recovery else 449999)[0]
@@ -1223,7 +1223,11 @@ def main():
                 s["sequence_edits"] = ed
             src = by_id[s["from"]]
             tbl("Skill/DT_SkillData")["add"].append({"row": s["jp"], "cloneFrom": src, "set": {
-                "ID": sid, "SortId": sid, "Name": text(s["en"]), "Description": text(s["desc"]), **s.get("set", {})}})
+                "ID": sid, "SortId": sid, "Name": text(s["en"]), "Description": text(s["desc"]),
+                "belongCommandList": [u["command"]["id"]],
+                "commandIdBelongDebuggingAllSkills": [u["command"]["id"], -1],
+                "mimicableUnitId": u["id"],
+                **s.get("set", {})}})
             if ffbe_resonance.uses_ffbe(u, s):
                 prepare_ffbe_resonance(u, s, sid, tbl, clones, authored_sequences)
                 continue
@@ -1242,7 +1246,7 @@ def main():
             if s.get("resonance"): s = apply_cinematic(s, vis)
             found = []
             for off in (0, 1, 2):
-                for rel in ("Asset/Skill/DT_SkillAsset", "Asset/Skill/CDT_SkillAsset_Demo"):
+                for rel in ("Asset/Skill/DT_SkillAsset", "Asset/Skill/CDT_SkillAsset_Prod"):
                     k = next((k for k, v in rows(rel).items() if v["ID"] == vis + off), None)
                     if not k: continue
                     row_set = {"ID": sid + off}

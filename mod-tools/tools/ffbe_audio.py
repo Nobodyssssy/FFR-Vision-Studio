@@ -270,7 +270,7 @@ def _prepare_bank(unit, skill, source, tbl):
             occurrences[sound["cueId"]] = count + 1
             name, duration = recording["name"], recording["durationMs"]
         events.append({**sound, "sourceCueName": cue["name"], "cueName": name, "durationMs": duration, "bank": bank["name"]})
-    for rel in ("Asset/Sound/DT_SoundCueSheetAsset", "Asset/Sound/CDT_SoundCueSheetAsset_Demo"):
+    for rel in ("Asset/Sound/DT_SoundCueSheetAsset", "Asset/Sound/CDT_SoundCueSheetAsset_Prod"):
         additions = tbl(rel)["add"]
         if not any(r["row"] == bank["name"] for r in additions):
             additions.append({"row": bank["name"], "cloneFrom": "SE_BTL",

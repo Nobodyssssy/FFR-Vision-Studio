@@ -1,5 +1,6 @@
 """Portable FFBE skill icons, shared by Studio previews and cooked game tables."""
 import json
+import os
 from pathlib import Path
 import re
 
@@ -45,7 +46,16 @@ def recipe_tag(recipe, edits=None):
     if source:
         source_path = path(source)
         if source_path: return tag(source_path.name)
-        # No silent substitute for a missing source asset in a finished build.
+        # Experimental FFBE skill builds may use the existing FFR icon tag
+        # without synthesizing or mislabelling a copyrighted source image.
+        # The shipping default remains strict and never silently substitutes.
+        if os.environ.get('FFR_ALLOW_NATIVE_ICON_FALLBACK') == '1':
+            native = settings.get('SkillIcon.TagName')
+            if isinstance(native, str) and native.startswith('UI.Skill.Action.Icon.') and not native.startswith(PREFIX):
+                print(f'EXPERIMENTAL ICON FALLBACK: missing {source}; using native {native}', flush=True)
+                return native
+            print(f'EXPERIMENTAL ICON FALLBACK: missing {source}; retaining existing skill donor icon', flush=True)
+            return None
         raise ValueError(f'Missing FFBE skill icon {source}. Add its icon asset before building.')
     return settings.get('SkillIcon.TagName')
 
