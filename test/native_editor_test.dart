@@ -100,7 +100,7 @@ void main() {
     await tester.pumpWidget(ChangeNotifierProvider<AppState>.value(value: app, child: MaterialApp(theme: Guide.theme(), home: Scaffold(body: StatefulBuilder(
       builder: (_, state) => AbilitiesStep(unit: unit, set: (patch) => state(() => unit = {...unit, ...patch})))))));
     await tester.pumpAndSettle();
-    expect(find.text('Native Abilities'), findsOneWidget);
+expect(find.text('FFR abilities'), findsOneWidget);
     expect(find.text('Brave Heart'), findsOneWidget); // bonus is visible on Abilities
     expect(find.text('HP'), findsOneWidget);
     expect(find.text('FFBE skills · test loadout'), findsNothing);
@@ -150,7 +150,7 @@ void main() {
               child: bonuses ? BonusesStep(key: ValueKey('$dark-$width-b'), unit: unit, set: (patch) => state(() => unit = {...unit, ...patch}))
                 : AbilitiesStep(key: ValueKey('$dark-$width-a'), unit: unit, set: (patch) => state(() => unit = {...unit, ...patch})))))))));
           await tester.pumpAndSettle();
-          expect(find.text(bonuses ? 'Native Bonuses' : 'Native Abilities'), findsOneWidget);
+expect(find.text(bonuses ? 'Native Bonuses' : 'FFR abilities'), findsOneWidget);
           expect(find.descendant(of: find.byType(LearnedTiers), matching: find.text('Falling Slash')), findsOneWidget);
           expect(find.descendant(of: find.byType(LearnedTiers), matching: find.text('Brave Heart')), findsOneWidget);
           if (bonuses) {
