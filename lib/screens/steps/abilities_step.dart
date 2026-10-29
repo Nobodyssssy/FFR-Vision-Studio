@@ -17,7 +17,7 @@ class AbilitiesStep extends StatefulWidget {
 }
 
 class _AbilitiesStepState extends State<AbilitiesStep> {
-  String q = '', group = 'ffr';
+  String q = '', group = 'ffr', sourceFilter = 'all', statusFilter = 'all';
   String category(Map s) {
     final supportive = s['relation'] == 'Friendlies' || s['dmgType'] == 'None';
     if (s['attr'] == 'Magic' || s['attr'] == 'MagicSword') {
@@ -32,11 +32,35 @@ class _AbilitiesStepState extends State<AbilitiesStep> {
     final cat = app.catalog!;
     final skills = (cat['skills'] as List).cast<Map<String, dynamic>>();
 
+    const extraDarkGrants = <int>{220390, 220520, 220400, 225270};
+
     bool canAssign(Map s) =>
-        (s['seq'] as List?)?.isNotEmpty == true &&
         s['hasUnit'] == 'All' &&
         ['Ability', 'Magic', 'MagicSword'].contains(s['attr']) &&
-        (s['id'] as num) < 460000;
+        s['id'] is num && (s['id'] as num) < 460000 &&
+        ((s['seq'] as List?)?.isNotEmpty == true ||
+            extraDarkGrants.contains(s['id']));
+
+    String sourceOf(Map s) {
+      final row = (s['row'] ?? '').toString();
+      if (row.contains('敵用')) return 'enemy';
+      final owner = (s['hasUnit'] ?? '').toString();
+      if (owner.isEmpty) return 'unknown';
+      return owner == 'All' ? 'general' : 'character';
+    }
+
+    String sourceLabel(Map s) {
+      switch (sourceOf(s)) {
+        case 'enemy':
+          return 'Enemy-use';
+        case 'character':
+          return 'Character: ${s['hasUnit']}';
+        case 'general':
+          return 'General / player-side';
+        default:
+          return 'Unclassified';
+      }
+    }
 
     final lib = skills.toList()
       ..sort((a, b) => a['name'].toString().compareTo(b['name'].toString()));
@@ -49,7 +73,12 @@ class _AbilitiesStepState extends State<AbilitiesStep> {
     final query = q.trim().toLowerCase();
     bool matches(Map r) => '${r['name']} ${r['description'] ?? r['desc'] ?? ''}'.toLowerCase().contains(query);
     final natives = (group == 'native' || group == 'all') ? nativeEntries(unit).where((e) => e['kind'] != 'PASSIVE' && matches(e)).toList() : <Map<String, dynamic>>[];
-    final shown = lib.where((r) => (group == 'all' || group == 'ffr' || category(r) == group) && matches(r)).toList();
+    final shown = lib.where((r) =>
+        (group == 'all' || group == 'ffr' || category(r) == group) &&
+        (sourceFilter == 'all' || sourceOf(r) == sourceFilter) &&
+        (statusFilter == 'all' ||
+            (statusFilter == 'allowed' ? canAssign(r) : !canAssign(r))) &&
+        matches(r)).toList();
     final studioShown = (group == 'all' || group == 'studio') ? studio.where(matches).toList() : <Map<String, dynamic>>[];
 
     void add(int tier, int index, DragPayload payload) {
@@ -84,6 +113,39 @@ class _AbilitiesStepState extends State<AbilitiesStep> {
             items: [for (final e in {'native': 'Native Abilities', 'all': 'All abilities', 'ffr': 'FFR abilities', if (studio.isNotEmpty) 'studio': 'Studio moves', for (final name in lib.map(category).toSet()) name: name}.entries)
               DropdownMenuItem(value: e.key, child: Text(e.value, overflow: TextOverflow.ellipsis))], onChanged: (v) => setState(() => group = v ?? 'native'))),
         ])),
+        if (group != 'native' && group != 'studio')
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            child: Row(children: [
+              Expanded(child: DropdownButton<String>(
+                value: sourceFilter,
+                isExpanded: true,
+                style: Guide.text(),
+                dropdownColor: Guide.paper,
+                items: const <DropdownMenuItem<String>>[
+                  DropdownMenuItem(value: 'all', child: Text('All sources', overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(value: 'general', child: Text('General / player-side', overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(value: 'character', child: Text('Character-specific', overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(value: 'enemy', child: Text('Enemy-use', overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(value: 'unknown', child: Text('Unclassified', overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (v) => setState(() => sourceFilter = v ?? 'all'),
+              )),
+              const SizedBox(width: 8),
+              Expanded(child: DropdownButton<String>(
+                value: statusFilter,
+                isExpanded: true,
+                style: Guide.text(),
+                dropdownColor: Guide.paper,
+                items: const <DropdownMenuItem<String>>[
+                  DropdownMenuItem(value: 'all', child: Text('All skills', overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(value: 'allowed', child: Text('Can assign', overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(value: 'viewonly', child: Text('View only', overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (v) => setState(() => statusFilter = v ?? 'all'),
+              )),
+            ]),
+          ),
         Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10), child: Text('Import the full native list, or use a left handle to place an ability. Native limit bursts are available on the Resonance tab.', style: Guide.small())),
         Expanded(child: total == 0 ? Center(child: Text(group == 'native' && query.isEmpty ? 'This vision has no native abilities.' : 'No matching abilities.', style: Guide.small()))
           : ListView.builder(padding: const EdgeInsets.symmetric(horizontal: 12), itemCount: total, itemBuilder: (_, i) {
@@ -97,7 +159,7 @@ class _AbilitiesStepState extends State<AbilitiesStep> {
             }
             final row = shown[j - studioShown.length];
             final data = grantData(unit, cat, {'kind': 'ActiveSkill', 'id': row['id']});
-            return LibraryRow(title: data.name, detail: '${data.description.isEmpty ? describe(row) : data.description} · ${data.cost} MP', zebra: i.isOdd,
+            return LibraryRow(title: data.name, detail: '${data.description.isEmpty ? describe(row) : data.description} · ${data.cost} MP · ${sourceLabel(row)}', zebra: i.isOdd,
               icon: GrantIcon(data: data, api: app.api!, catalog: cat), payload: DragPayload('skill', row['id']), enabled: canAssign(row), done: granted.contains(row['id']),
               onInfo: () => showGrantInfo(context, unit, data), onAdd: (t) => add(t, aw[t].length, DragPayload('skill', row['id'])));
           })),
