@@ -31,16 +31,8 @@ class _AbilitiesStepState extends State<AbilitiesStep> {
     final app = context.read<AppState>(), unit = widget.unit;
     final cat = app.catalog!;
     final skills = (cat['skills'] as List).cast<Map<String, dynamic>>();
-final lib = skills.toList()
-  ..sort((a, b) => a['name'].toString().compareTo(b['name'].toString()));
-
-bool canAssign(Map<String, dynamic> s) =>
-    s['seq'] is List &&
-    (s['seq'] as List).isNotEmpty &&
-    s['hasUnit'] == 'All' &&
-    ['Ability', 'Magic', 'MagicSword'].contains(s['attr']) &&
-    s['id'] is num &&
-    (s['id'] as num) < 460000;
+    final lib = skills.where((s) => (s['seq'] as List).isNotEmpty && s['hasUnit'] == 'All' && ['Ability', 'Magic', 'MagicSword'].contains(s['attr']) && (s['id'] as num) < 460000).toList()
+      ..sort((a, b) => a['name'].toString().compareTo(b['name'].toString()));
     final studio = ((cat['studioSkills'] as List?) ?? []).cast<Map<String, dynamic>>();
     final aw = awakening(unit);
     final granted = {for (final t in aw) for (final g in t) if (g[0] == 'ActiveSkill') g[1]};
@@ -94,7 +86,7 @@ bool canAssign(Map<String, dynamic> s) =>
             final row = shown[j - studioShown.length];
             final data = grantData(unit, cat, {'kind': 'ActiveSkill', 'id': row['id']});
             return LibraryRow(title: data.name, detail: '${data.description.isEmpty ? describe(row) : data.description} · ${data.cost} MP', zebra: i.isOdd,
-              icon: GrantIcon(data: data, api: app.api!, catalog: cat), payload: DragPayload('skill', row['id']), done: granted.contains(row['id']), enabled: canAssign(row),
+              icon: GrantIcon(data: data, api: app.api!, catalog: cat), payload: DragPayload('skill', row['id']), done: granted.contains(row['id']),
               onInfo: () => showGrantInfo(context, unit, data), onAdd: (t) => add(t, aw[t].length, DragPayload('skill', row['id'])));
           })),
       ])),

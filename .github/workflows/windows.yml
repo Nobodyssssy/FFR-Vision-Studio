@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
     inputs:
       build:
-        description: Optional build number (0 = automatic)
-        default: '0'
+        description: build number to stamp (1.0.0.<build>)
+        default: "0"
 
 jobs:
   windows:
@@ -25,15 +25,10 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          $inputBuild = '${{ github.event.inputs.build }}'
-          $build = [Math]::Max(16, [int]$env:GITHUB_RUN_NUMBER)
-          if ($inputBuild -match '^[1-9][0-9]*$') {
-            $build = [int]$inputBuild
-          }
-          Write-Host "Building FFR Vision Studio version 1.0.0.$build"
+          $build = "${{ github.event.inputs.build }}"
+          if (-not $build) { $build = "0" }
           flutter build windows --release --build-name 1.0.0 --build-number $build --dart-define=APP_VERSION=1.0.0 --dart-define=APP_BUILD=$build
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Rename-Item build/windows/x64/runner/Release/ffr_vision_studio.exe 'FFR Vision Studio.exe'
+          Rename-Item build/windows/x64/runner/Release/ffr_vision_studio.exe "FFR Vision Studio.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: FFR-Vision-Studio-windows

@@ -234,13 +234,13 @@ TEMPLATE_NOTES = {
              "blurb": "Cloud's ascension, staged without a domain. The copy drops his CG movie, his lines and his own slashes and starts at the unit's limit-burst motion: a dash to the target, the motion, the hits, about 11 s. Pick what plays on the targets below."},
 }
 
-
 def load():
     p = os.path.join(OUT, "ffr_catalog.json")
     cat = json.load(open(p, encoding="utf-8")) if os.path.isfile(p) else None
+    current = source_stamp()
     if (cat is None or cat.get("schema") != SCHEMA or
-            len(cat.get("skills", [])) != 1167 or
-            len(cat.get("passives", [])) != 378):
+            (current is not None and cat.get("sourceStamp") != current)):
+        # Never silently return demo rows after production tables are available.
         cat = build()
     import skill_icons
     cat['icons'] = [i for i in cat['icons'] if not i['tag'].startswith(skill_icons.PREFIX)] + skill_icons.catalog()
