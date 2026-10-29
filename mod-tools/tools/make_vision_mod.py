@@ -1127,7 +1127,67 @@ def generate_sprites(u):
     vid, d = u["id"], u["donor"]; ff = u["ffbe"]
     work = os.path.join(ROOT, "build", "sprites", u["key"])
     base = [] if not ff.get("baseDir") or not os.path.isdir(os.path.join(ROOT, ff["baseDir"])) else ["--base", os.path.join(ROOT, ff["baseDir"]), str(ff.get("baseForm"))]
-    run(ffrenv.py(os.path.join(ROOT, "tools", "ffbe2ss6", "build_sprites.py"), os.path.join(ROOT, ff["dir"]), ff["id"], str(vid), work) + base)
+
+    from pathlib import Path
+    from PIL import __version__ as pillow_version
+    from devui import build_receipt
+
+    workdir = Path(work)
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    identity = workdir / ".atlas-identity.json"
+    identity.write_text(json.dumps({
+        "visionId": vid,
+        "ffbeForm": str(ff["id"]),
+        "baseForm": str(ff.get("baseForm")),
+        "baseAvailable": bool(base),
+        "pillowVersion": pillow_version,
+        "pythonVersion": list(sys.version_info[:3]),
+    }, sort_keys=True), encoding="utf-8")
+
+    inputs = {
+        "identity": identity,
+        "build_sprites.py": Path(ROOT) / "tools/ffbe2ss6/build_sprites.py",
+        "ffbe_frames.py": Path(ROOT) / "tools/ffbe2ss6/ffbe_frames.py",
+    }
+
+    folders = [("selected", Path(ROOT) / ff["dir"])]
+    if base:
+        folders.append(("base", Path(ROOT) / ff["baseDir"]))
+
+    for label, folder in folders:
+        if folder.is_dir():
+            for source in folder.rglob("*"):
+                if source.is_file():
+                    key = f"{label}/{source.relative_to(folder).as_posix()}"
+                    inputs[key] = source
+
+    outputs = {
+        name: workdir / name
+        for name in (
+            "battle/spec.json",
+            "battle/atlas.png",
+            "battle/tex.bgra",
+            "battle/normal.bc5",
+            "battle/mreo.bgra",
+            "menu/spec.json",
+            "menu/atlas.png",
+            "menu/tex.bgra",
+        )
+    }
+
+    receipt = workdir / ".atlas-receipt.json"
+
+    if build_receipt.reusable(receipt, inputs, outputs):
+        print(f"Reused unchanged FFBE atlases: {u['en']}", flush=True)
+    else:
+        run(ffrenv.py(
+            os.path.join(ROOT, "tools", "ffbe2ss6", "build_sprites.py"),
+            os.path.join(ROOT, ff["dir"]),
+            ff["id"], str(vid), work,
+        ) + base)
+        build_receipt.record(receipt, inputs, outputs)
+
     chara = os.path.join(LEGACY, "FFRS", "Content", "Chara")
     out_b = os.path.join(OUT, "FFRS", "Content", "Chara", "summon", f"summon{vid}"); out_m = os.path.join(OUT, "FFRS", "Content", "Chara", "menu", f"summon{vid}")
     def ss6(kind, spec, out):
