@@ -83,16 +83,26 @@ function Tiers({ unit, set, kinds, render, dropType, onDrop, hint }: { unit: Uni
 function Abilities({ unit, cat, set }: { unit: Unit; cat: Catalog; set: (p: Partial<Unit>) => void }) {
   const [q, setQ] = useState("");
   const [group, setGroup] = useState("all");
-  const lib = useMemo(() => cat.skills.map((s) => ({ ...s, grantable: s.seq.length > 0 && s.hasUnit === "All" && ["Ability", "Magic", "MagicSword"].includes(s.attr) }))
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [allowEnemyTests, setAllowEnemyTests] = useState(false);
+  const sourceOf = (s: any) => String(s.row || "").includes("敵用") ? "enemy" :
+    (s.id >= 500000 || (s.id >= 300000 && s.id < 400000)) ? "unknown" : s.hasUnit && s.hasUnit !== "All" ? "character" : s.hasUnit === "All" ? "general" : "unknown";
+  const lib = useMemo(() => cat.skills.map((s) => ({ ...s, grantable: ["Ability", "Magic", "MagicSword"].includes(s.attr) &&
+    ((!String(s.row || "").includes("敵用") && s.id < 500000 && !(s.id >= 300000 && s.id < 400000)) || allowEnemyTests) }))
     .map((s) => ({ ...s, group: s.attr === "Magic" || s.attr === "MagicSword" ? (s.element && s.element !== "None" ? `${s.element} magic` : s.relation === "Friendlies" || s.dmgType === "None" ? "White magic" : "Magic") : (s.relation === "Friendlies" || s.dmgType === "None") ? "Support abilities" : "Attack abilities" }))
-    .sort((a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name)), [cat]);
+    .sort((a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name)), [cat, allowEnemyTests]);
   const groups = useMemo(() => Array.from(new Set(lib.map((s) => s.group))), [lib]);
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return lib.filter((x) => (group === "all" || x.group === group) && (!s || x.name.toLowerCase().includes(s) || describe(x).toLowerCase().includes(s)));
-  }, [lib, q, group]);
+    return lib.filter((x) => (group === "all" || x.group === group) &&
+      (sourceFilter === "all" || sourceOf(x) === sourceFilter) &&
+      (statusFilter === "all" || (statusFilter === "allowed" ? x.grantable : !x.grantable)) &&
+      (!s || x.name.toLowerCase().includes(s) || describe(x).toLowerCase().includes(s)));
+  }, [lib, q, group, sourceFilter, statusFilter]);
   const granted = new Set(unit.awakening.flatMap((t) => t.filter((g) => g[0] === "ActiveSkill").map((g) => +g[1])));
   function add(tier: number, id: number) {
+    if (!lib.some((s) => s.id === id && s.grantable)) return;
     if (granted.has(id)) return;
     if (tierCount(unit, tier) >= TIER_CAP) { alert(`Tier ${tier + 1} already holds ${TIER_CAP} bonuses. Choose another tier.`); return; }
     const aw = clone(unit.awakening); aw[tier] = [...aw[tier], ["ActiveSkill", id]]; set({ awakening: aw });
@@ -110,6 +120,16 @@ function Abilities({ unit, cat, set }: { unit: Unit; cat: Catalog; set: (p: Part
         <h3>The game's abilities ({shown.length}/{lib.length}) <span className="hint">drag one onto a tier on the right, or use "add"</span></h3>
         <div className="row"><input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
           <select value={group} onChange={(e) => setGroup(e.target.value)}><option value="all">All groups</option>{groups.map((g) => <option key={g}>{g}</option>)}</select></div>
+        <div className="row">
+          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
+            <option value="all">All sources</option><option value="general">Shared / player-side</option><option value="character">Character-specific</option>
+            <option value="enemy">Enemy-use</option><option value="unknown">Unclassified</option>
+          </select>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <option value="all">All skills</option><option value="allowed">Eligible to test</option><option value="viewonly">View only</option>
+          </select>
+        </div>
+        <label className="muted"><input type="checkbox" checked={allowEnemyTests} onChange={(e) => setAllowEnemyTests(e.target.checked)} /> Enable enemy / summon / unclassified skills (unverified)</label>
         <div style={{ maxHeight: "62vh", overflow: "auto" }}>
           {shown.map((s) => {
             const done = granted.has(s.id); const ic = iconUrl(cat, s.icon);
@@ -143,12 +163,18 @@ function Abilities({ unit, cat, set }: { unit: Unit; cat: Catalog; set: (p: Part
 // ---------------------------------------------------------------- 2. bonuses: stat boosts and the game's passives
 function Bonuses({ unit, cat, set }: { unit: Unit; cat: Catalog; set: (p: Partial<Unit>) => void }) {
   const [q, setQ] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [learnedFilter, setLearnedFilter] = useState("all");
   const [amounts, setAmounts] = useState<Record<number, number>>(Object.fromEntries(STAT_PARAMS.map(([id, , d]) => [id, d])));
+  const grantedP = new Set(unit.awakening.flatMap((t) => t.filter((g) => g[0] === "PassiveSkill").map((g) => +g[1])));
   const passives = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return cat.passives.filter((p) => p.name && (!s || p.name.toLowerCase().includes(s) || (p.desc || "").toLowerCase().includes(s))).sort((a, b) => a.name.localeCompare(b.name));
-  }, [cat, q]);
-  const grantedP = new Set(unit.awakening.flatMap((t) => t.filter((g) => g[0] === "PassiveSkill").map((g) => +g[1])));
+    return cat.passives.filter((p) => p.name &&
+      (sourceFilter === "all" || (sourceFilter === "enemy" ? String(p.row || "").includes("敵用") : !String(p.row || "").includes("敵用"))) &&
+      (learnedFilter === "all" || (learnedFilter === "learned" ? grantedP.has(p.id) : !grantedP.has(p.id))) &&
+      (!s || p.name.toLowerCase().includes(s) || (p.desc || "").toLowerCase().includes(s)))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [cat, q, sourceFilter, learnedFilter, unit.awakening]);
   function add(tier: number, g: Grant) {
     if (g[0] === "PassiveSkill" && grantedP.has(+g[1])) return;
     if (tierCount(unit, tier) >= TIER_CAP) { alert(`Tier ${tier + 1} already holds ${TIER_CAP} bonuses. Choose another tier.`); return; }
@@ -178,6 +204,10 @@ function Bonuses({ unit, cat, set }: { unit: Unit; cat: Catalog; set: (p: Partia
         <div className="panel">
           <h3>The game's passives ({passives.length}/{cat.passives.length})</h3>
           <input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: "100%", marginBottom: 6 }} />
+          <div className="row">
+            <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}><option value="all">All sources</option><option value="enemy">Enemy-use</option><option value="other">Other / unspecified</option></select>
+            <select value={learnedFilter} onChange={(e) => setLearnedFilter(e.target.value)}><option value="all">All bonuses</option><option value="learned">Learned</option><option value="notlearned">Not learned</option></select>
+          </div>
           <div style={{ maxHeight: "40vh", overflow: "auto" }}>
             {passives.map((p) => {
               const done = grantedP.has(p.id); const ic = iconUrl(cat, p.icon);

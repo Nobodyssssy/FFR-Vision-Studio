@@ -18,6 +18,7 @@ class AbilitiesStep extends StatefulWidget {
 
 class _AbilitiesStepState extends State<AbilitiesStep> {
   String q = '', group = 'ffr', sourceFilter = 'all', statusFilter = 'all';
+  bool allowEnemyTests = false;
   String category(Map s) {
     final supportive = s['relation'] == 'Friendlies' || s['dmgType'] == 'None';
     if (s['attr'] == 'Magic' || s['attr'] == 'MagicSword') {
@@ -32,18 +33,24 @@ class _AbilitiesStepState extends State<AbilitiesStep> {
     final cat = app.catalog!;
     final skills = (cat['skills'] as List).cast<Map<String, dynamic>>();
 
-    const extraDarkGrants = <int>{220390, 220520, 220400, 225270};
-
-    bool canAssign(Map s) =>
-        s['hasUnit'] == 'All' &&
-        ['Ability', 'Magic', 'MagicSword'].contains(s['attr']) &&
-        s['id'] is num && (s['id'] as num) < 460000 &&
-        ((s['seq'] as List?)?.isNotEmpty == true ||
-            extraDarkGrants.contains(s['id']));
+    // A missing catalog sequence is not proof a skill fails: native Dark, Darkra,
+    // Darkga and Darkga (all) were verified working in the installed full release.
+    // Grant IDs are written by the existing mod builder, without new asset conversion.
+    bool canAssign(Map s) {
+      final id = s['id'];
+      if (id is! num || !['Ability', 'Magic', 'MagicSword'].contains(s['attr'])) return false;
+      final row = (s['row'] ?? '').toString();
+      final special = row.contains('敵用') || id >= 500000 || (id >= 300000 && id < 400000);
+      return !special || allowEnemyTests;
+    }
 
     String sourceOf(Map s) {
       final row = (s['row'] ?? '').toString();
       if (row.contains('敵用')) return 'enemy';
+      // Many 500k+ skills are enemy actions but lack the explicit Japanese marker.
+      // Keep them unclassified instead of claiming they are player abilities.
+      if (s['id'] is num && ((s['id'] as num) >= 500000 ||
+          ((s['id'] as num) >= 300000 && (s['id'] as num) < 400000))) return 'unknown';
       final owner = (s['hasUnit'] ?? '').toString();
       if (owner.isEmpty) return 'unknown';
       return owner == 'All' ? 'general' : 'character';
@@ -139,13 +146,18 @@ class _AbilitiesStepState extends State<AbilitiesStep> {
                 dropdownColor: Guide.paper,
                 items: const <DropdownMenuItem<String>>[
                   DropdownMenuItem(value: 'all', child: Text('All skills', overflow: TextOverflow.ellipsis)),
-                  DropdownMenuItem(value: 'allowed', child: Text('Can assign', overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(value: 'allowed', child: Text('Eligible to test', overflow: TextOverflow.ellipsis)),
                   DropdownMenuItem(value: 'viewonly', child: Text('View only', overflow: TextOverflow.ellipsis)),
                 ],
                 onChanged: (v) => setState(() => statusFilter = v ?? 'all'),
               )),
             ]),
           ),
+        if (group != 'native' && group != 'studio')
+          Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 8), child: Row(children: [
+            Checkbox(value: allowEnemyTests, onChanged: (v) => setState(() => allowEnemyTests = v ?? false)),
+            Expanded(child: Text('Enable enemy / summon / unclassified skills (unverified)', style: Guide.small())),
+          ])),
         Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10), child: Text('Import the full native list, or use a left handle to place an ability. Native limit bursts are available on the Resonance tab.', style: Guide.small())),
         Expanded(child: total == 0 ? Center(child: Text(group == 'native' && query.isEmpty ? 'This vision has no native abilities.' : 'No matching abilities.', style: Guide.small()))
           : ListView.builder(padding: const EdgeInsets.symmetric(horizontal: 12), itemCount: total, itemBuilder: (_, i) {
@@ -159,7 +171,10 @@ class _AbilitiesStepState extends State<AbilitiesStep> {
             }
             final row = shown[j - studioShown.length];
             final data = grantData(unit, cat, {'kind': 'ActiveSkill', 'id': row['id']});
-            return LibraryRow(title: data.name, detail: '${data.description.isEmpty ? describe(row) : data.description} · ${data.cost} MP · ${sourceLabel(row)}', zebra: i.isOdd,
+            final testedDark = const <int>{220390, 220520, 220400, 225270}.contains(row['id']);
+            final sequenceNote = testedDark ? ' · In-game tested' :
+                (row['seq'] as List?)?.isNotEmpty == true ? '' : ' · Sequence not indexed';
+            return LibraryRow(title: data.name, detail: '${data.description.isEmpty ? describe(row) : data.description} · ${data.cost} MP · ${sourceLabel(row)}$sequenceNote', zebra: i.isOdd,
               icon: GrantIcon(data: data, api: app.api!, catalog: cat), payload: DragPayload('skill', row['id']), enabled: canAssign(row), done: granted.contains(row['id']),
               onInfo: () => showGrantInfo(context, unit, data), onAdd: (t) => add(t, aw[t].length, DragPayload('skill', row['id'])));
           })),
