@@ -125,6 +125,12 @@ def converted_archive(form: str):
         raise HTTPException(404, str(ex))
     return FileResponse(path, media_type='application/octet-stream', filename=form + '.ffr')
 
+@app.get("/api/assets/plan")
+def preview_asset_downloads(ffbeId: str, form: str):
+    try:
+        return unit_downloads.plan_selection(ffbeId, form)
+    except ValueError as ex:
+        raise HTTPException(422, str(ex)) from ex
 
 @app.post('/api/assets/prepare')
 async def prepare_assets(req: Request):

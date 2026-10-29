@@ -183,5 +183,32 @@ class Downloads(unittest.TestCase):
 
         self.assertEqual(requests, [f"bytes={offset}-"])
 
+    def test_plan_is_read_only_and_reuses_prepared_assets(self):
+        catalog = {
+            "units": [{
+                "id": "100",
+                "packs": ["100", "101"],
+                "shift": {"101": {"base": "100"}},
+            }],
+            "unitBundles": {
+                "100": self.bundle("100"),
+                "101": self.bundle("101"),
+            },
+        }
+
+        with patch.object(assets, "index", return_value=catalog):
+            before = assets.plan_selection("100", "101")
+            self.assertEqual(["101", "100"], before["requiredForms"])
+            self.assertGreater(before["knownDownloadBytes"], 0)
+            self.assertEqual([], self.requested)
+
+            assets.ensure_selection("100", "101")
+
+            after = assets.plan_selection("100", "101")
+            self.assertEqual(0, after["knownDownloadBytes"])
+            self.assertTrue(
+                all(f["status"] == "cached" for f in after["files"])
+            )
+            self.assertEqual(3, len(self.requested))
 
 if __name__ == '__main__': unittest.main()

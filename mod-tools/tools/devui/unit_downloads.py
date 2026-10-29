@@ -209,6 +209,160 @@ def ensure_form(form, info, report):
     marker.write_text(info['sha256'])
 
 
+def plan_selection(uid, form):
+    """Preview known unit/audio downloads without network or writes."""
+    uid, form = str(uid), str(form)
+    if not uid.isdecimal() or not form.isdecimal():
+        raise ValueError("Choose a valid unit and form.")
+
+    catalog = index()
+    bundles = catalog.get("unitBundles") or catalog.get("forms") or {}
+    if not bundles:
+        return {
+            "status": "catalog-unavailable",
+            "knownDownloadBytes": None,
+            "files": [],
+            "buildStatus": "not-checked",
+        }
+
+    row = next(
+        (r for r in catalog.get("units", [])
+         if str(r.get("id")) == uid),
+        None,
+    )
+    if not row or form not in [
+        str(f) for f in
+        (row.get("packs") or row.get("spriteForms") or [])
+    ]:
+        raise ValueError("This form is not available for the unit.")
+
+    base = (row.get("shift", {}).get(form) or {}).get("base")
+    wanted = list(dict.fromkeys(
+        [form] + ([str(base)] if base else [])
+    ))
+
+    data = ROOT / "data/ffbe"
+    entries = []
+    seen_sounds = set()
+    total = 0
+
+    def metadata(info):
+        digest = info.get("sha256")
+        size = info.get("size")
+        if not isinstance(digest, str) or not re.fullmatch(
+            r"[a-f0-9]{64}", digest
+        ) or type(size) is not int or size < 0:
+            raise ValueError("Invalid asset catalog checksum or size.")
+        return digest, size
+
+    def verified(path, digest, size):
+        try:
+            if not path.is_file() or path.stat().st_size != size:
+                return False
+            with path.open("rb") as stream:
+                return hashlib.file_digest(
+                    stream, "sha256"
+                ).hexdigest() == digest
+        except OSError:
+            return False
+
+    def installed(fid, info, digest):
+        modern = info.get("format") == "ffr-unit-1"
+        required = [
+            f"sprites/{fid}/unit_anime_{fid}.png",
+            f"sprites/{fid}/unit_cgg_{fid}.csv",
+            f"sprites/{fid}/unit_idle_cgs_{fid}.csv",
+        ]
+        if modern:
+            required.extend([
+                f"unit_records/{info['unitId']}.json",
+                f"lb_profiles/{fid}.json",
+                f"audio/lb/{fid}.json",
+            ])
+            for flag, path in [
+                ("nativeKit", f"native_kits/{fid}.json"),
+                ("presentation", f"presentation/{fid}.json"),
+                ("effects", f"presentation/effects/{fid}.json"),
+            ]:
+                if info.get(flag):
+                    required.append(path)
+
+        marker = data / "sprites" / fid / ".complete"
+        try:
+            if marker.read_text() != digest:
+                return False
+            if not all((data / name).is_file() for name in required):
+                return False
+
+            if info.get("effects"):
+                import ffbe_effect_bundle
+                import ffbe_effect_refs
+                if info["effects"] == ffbe_effect_refs.VERSION:
+                    ffbe_effect_refs.read_installed(data, fid)
+                elif info["effects"] == ffbe_effect_bundle.VERSION:
+                    ffbe_effect_bundle.verify_installed(data, fid)
+                else:
+                    return False
+            return True
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+
+    def add(kind, fid, digest, size, ready):
+        nonlocal total
+        missing = 0 if ready else size
+        total += missing
+        entries.append({
+            "kind": kind,
+            "form": fid,
+            "size": size,
+            "status": "cached" if ready else "download-required",
+            "downloadBytes": missing,
+        })
+
+    effects_unknown = False
+    for fid in wanted:
+        info = bundles.get(fid)
+        if not isinstance(info, dict):
+            raise ValueError(f"No unit bundle for form {fid}.")
+
+        digest, size = metadata(info)
+        modern = info.get("format") == "ffr-unit-1"
+        archive = app_root() / "downloads" / (
+            fid + (".ffr" if modern else ".zip")
+        )
+        ready = installed(fid, info, digest) or verified(
+            archive, digest, size
+        )
+        add("unit", fid, digest, size, ready)
+
+        if info.get("effects") == "ffr-effects-ref-1":
+            effects_unknown = True
+
+        for sound in info.get("sounds", []):
+            sound_hash, sound_size = metadata(sound)
+            if sound_hash in seen_sounds:
+                continue
+            seen_sounds.add(sound_hash)
+            path = data / "audio" / "samples" / (
+                sound_hash + ".hca"
+            )
+            add(
+                "audio", fid, sound_hash, sound_size,
+                verified(path, sound_hash, sound_size),
+            )
+
+    return {
+        "status": "ready",
+        "unitId": uid,
+        "form": form,
+        "requiredForms": wanted,
+        "files": entries,
+        "knownDownloadBytes": total,
+        "additionalEffectsMayBeRequired": effects_unknown,
+        "buildStatus": "not-checked",
+    }
+
+
 def ensure_selection(uid, form, report=lambda **kw: None):
     catalog = index()
     bundles = catalog.get('unitBundles') or catalog.get('forms') or {}
