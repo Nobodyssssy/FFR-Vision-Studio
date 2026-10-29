@@ -65,13 +65,11 @@ class _AbilitiesStepState extends State<AbilitiesStep> {
         final recipe = sk['recipe'] as Map;
         nextSkills = {...mine, '$id': {'from': recipe['from'], 'visuals': recipe['visuals'] ?? recipe['from'], 'jp': '${unit['jp']}_Studio_$id',
           'en': sk['name'], 'desc': sk['desc'], 'descAuto': false, 'set': Map<String, dynamic>.from(recipe['set'] as Map? ?? {}), 'studio': sk['key']}};
-      } else { id = payload.value as num; if (grante
       } else {
         id = payload.value as num;
         final skill = skills.where((s) => s['id'] == id).firstOrNull;
         if (skill == null || !canAssign(skill) || granted.contains(id)) return;
       }
-d.contains(id)) return; }
       final next = deepCopy(aw); next[tier].insert(index.clamp(0, next[tier].length), ['ActiveSkill', id]);
       widget.set({'awakening': next, 'skills': nextSkills});
     }
