@@ -125,9 +125,11 @@ def prepare(game=None, log=print):
     _extract(paks, log)
     _dump_rows(log)
     _listing(paks, log)
-    if not os.path.exists(os.path.join(DEVUI, "ffr_catalog.json")):
-        log("building the skill catalog ...")
-        import ffr_catalog; ffr_catalog.build()
+    # A shipped catalog is only a startup fallback. After extracting the game,
+    # refresh from its authoritative ability and passive tables if changed.
+    log("checking the installed game's abilities and bonuses ...")
+    import ffr_catalog
+    ffr_catalog.load()
     if not os.path.exists(os.path.join(DEVUI, "ffbe_index.json")):
         log("indexing the Brave Exvius data ...")
         try:

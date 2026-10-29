@@ -83,7 +83,7 @@ function Tiers({ unit, set, kinds, render, dropType, onDrop, hint }: { unit: Uni
 function Abilities({ unit, cat, set }: { unit: Unit; cat: Catalog; set: (p: Partial<Unit>) => void }) {
   const [q, setQ] = useState("");
   const [group, setGroup] = useState("all");
-  const lib = useMemo(() => cat.skills.filter((s) => s.seq.length && s.hasUnit === "All" && ["Ability", "Magic", "MagicSword"].includes(s.attr) && s.id < 460000)
+  const lib = useMemo(() => cat.skills.map((s) => ({ ...s, grantable: s.seq.length > 0 && s.hasUnit === "All" && ["Ability", "Magic", "MagicSword"].includes(s.attr) }))
     .map((s) => ({ ...s, group: s.attr === "Magic" || s.attr === "MagicSword" ? (s.element && s.element !== "None" ? `${s.element} magic` : s.relation === "Friendlies" || s.dmgType === "None" ? "White magic" : "Magic") : (s.relation === "Friendlies" || s.dmgType === "None") ? "Support abilities" : "Attack abilities" }))
     .sort((a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name)), [cat]);
   const groups = useMemo(() => Array.from(new Set(lib.map((s) => s.group))), [lib]);
@@ -107,16 +107,16 @@ function Abilities({ unit, cat, set }: { unit: Unit; cat: Catalog; set: (p: Part
   return (
     <div className="grid2">
       <div className="panel">
-        <h3>The game's abilities <span className="hint">drag one onto a tier on the right, or use "add"</span></h3>
+        <h3>The game's abilities ({shown.length}/{lib.length}) <span className="hint">drag one onto a tier on the right, or use "add"</span></h3>
         <div className="row"><input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
           <select value={group} onChange={(e) => setGroup(e.target.value)}><option value="all">All groups</option>{groups.map((g) => <option key={g}>{g}</option>)}</select></div>
         <div style={{ maxHeight: "62vh", overflow: "auto" }}>
           {shown.map((s) => {
             const done = granted.has(s.id); const ic = iconUrl(cat, s.icon);
             return (
-              <div key={s.id} className="ffbe-skill" style={{ opacity: done ? 0.45 : 1 }} draggable={!done} onDragStart={(e) => { e.dataTransfer.setData("text/ffr-skill", String(s.id)); e.dataTransfer.effectAllowed = "copy"; }}>
+              <div key={s.id} className="ffbe-skill" style={{ opacity: done ? 0.45 : 1 }} draggable={!done && s.grantable} onDragStart={(e) => { e.dataTransfer.setData("text/ffr-skill", String(s.id)); e.dataTransfer.effectAllowed = "copy"; }}>
                 <div className="t"><span style={{ display: "flex", alignItems: "center", gap: 6 }}>{ic && <img src={ic} className="icon16" />}<span>{s.name}<small style={{ marginLeft: 6 }}>{s.group}</small></span></span>
-                  {done ? <span className="muted">learned</span> : <select value="" onChange={(e) => { if (e.target.value !== "") add(+e.target.value, s.id); }} title="add to a tier"><option value="">add at tier…</option>{[0, 1, 2, 3].map((t) => <option key={t} value={t}>tier {t + 1}</option>)}</select>}</div>
+                  {done ? <span className="muted">learned</span> : s.grantable ? <select value="" onChange={(e) => { if (e.target.value !== "") add(+e.target.value, s.id); }} title="add to a tier"><option value="">add at tier…</option>{[0, 1, 2, 3].map((t) => <option key={t} value={t}>tier {t + 1}</option>)}</select> : <span className="muted" title="The full release has this ability, but it cannot be assigned with the current native skill binding">view only</span>}</div>
                 <div className="fx">{describe(s)} {s.cost ? `· ${s.cost} MP` : ""}</div>
               </div>
             );
@@ -146,7 +146,7 @@ function Bonuses({ unit, cat, set }: { unit: Unit; cat: Catalog; set: (p: Partia
   const [amounts, setAmounts] = useState<Record<number, number>>(Object.fromEntries(STAT_PARAMS.map(([id, , d]) => [id, d])));
   const passives = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return cat.passives.filter((p) => p.name && !/[぀-ヿ一-鿿]/.test(p.name) && (!s || p.name.toLowerCase().includes(s) || (p.desc || "").toLowerCase().includes(s))).sort((a, b) => a.name.localeCompare(b.name));
+    return cat.passives.filter((p) => p.name && (!s || p.name.toLowerCase().includes(s) || (p.desc || "").toLowerCase().includes(s))).sort((a, b) => a.name.localeCompare(b.name));
   }, [cat, q]);
   const grantedP = new Set(unit.awakening.flatMap((t) => t.filter((g) => g[0] === "PassiveSkill").map((g) => +g[1])));
   function add(tier: number, g: Grant) {
@@ -176,7 +176,7 @@ function Bonuses({ unit, cat, set }: { unit: Unit; cat: Catalog; set: (p: Partia
           ))}
         </div>
         <div className="panel">
-          <h3>The game's passives</h3>
+          <h3>The game's passives ({passives.length}/{cat.passives.length})</h3>
           <input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: "100%", marginBottom: 6 }} />
           <div style={{ maxHeight: "40vh", overflow: "auto" }}>
             {passives.map((p) => {
