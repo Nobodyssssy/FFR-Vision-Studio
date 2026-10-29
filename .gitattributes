@@ -1,0 +1,4 @@
+
+# Keep bundled engine assets byte-for-byte identical on every OS.
+# Their SHA-256 hashes are checked during application startup.
+assets/engine_overlay/** -text

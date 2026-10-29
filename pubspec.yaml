@@ -64,6 +64,7 @@ flutter:
   assets:
     - assets/fonts/OFL.txt
     - assets/brand/
+    - assets/engine_overlay/
   fonts:
     - family: Barlow
       fonts:

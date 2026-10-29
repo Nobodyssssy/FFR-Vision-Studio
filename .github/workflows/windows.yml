@@ -6,9 +6,16 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      publish_release:
+        description: Publish the verified Windows ZIP to public GitHub Releases (manual runs only)
+        type: boolean
+        default: false
       build:
         description: build number to stamp (1.0.0.<build>)
-        default: "0"
+        default: "16"
+
+permissions:
+  contents: write
 
 jobs:
   windows:
@@ -26,10 +33,22 @@ jobs:
         shell: pwsh
         run: |
           $build = "${{ github.event.inputs.build }}"
-          if (-not $build) { $build = "0" }
+          if (-not $build) { $build = "16" }
           flutter build windows --release --build-name 1.0.0 --build-number $build --dart-define=APP_VERSION=1.0.0 --dart-define=APP_BUILD=$build
           Rename-Item build/windows/x64/runner/Release/ffr_vision_studio.exe "FFR Vision Studio.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: FFR-Vision-Studio-windows
           path: build/windows/x64/runner/Release/
+      - name: Publish a clean-install GitHub release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $build = "${{ inputs.build }}"
+          if (-not $build) { $build = "16" }
+          $zip = "build/windows/FFR-Vision-Studio-1.0.0.$build-Windows.zip"
+          Compress-Archive -Path 'build/windows/x64/runner/Release/*' -DestinationPath $zip -Force
+          $tag = "v1.0.0.$build-full-native"
+          gh release create $tag $zip --title "FFR Vision Studio 1.0.0.$build (Full native library)" --notes 'Windows app with verified native catalog and bundled Advanced Studio/engine compatibility overlay. The game and data packs are downloaded on first launch.'

@@ -1,0 +1,30 @@
+{
+    "schema":  1,
+    "entries":  [
+                    {
+                        "file":  "web-index.html",
+                        "destination":  "tools/devui/web/dist/index.html",
+                        "sha256":  "e97c5078245627b5c5865e7743bb4a5c152e5cc8cfd5ba47f49e55cdaf4cda5b"
+                    },
+                    {
+                        "file":  "index-BH3P3fff.js",
+                        "destination":  "tools/devui/web/dist/assets/index-BH3P3fff.js",
+                        "sha256":  "553db6e56fa7bbd9ed003bb167df43cb373ebdbea7755a4a5afa12af9ebc9f8e"
+                    },
+                    {
+                        "file":  "index-BDpzhA59.css",
+                        "destination":  "tools/devui/web/dist/assets/index-BDpzhA59.css",
+                        "sha256":  "e2db7e6d2996874f65b619d63430fee149ad00976039864b8ba9e1480290426e"
+                    },
+                    {
+                        "file":  "ffr_catalog.json",
+                        "destination":  "data/ffr_catalog.json",
+                        "sha256":  "65c9e037325629ddded4aca88541060f794922de7311b437ae6c1eeeb50274f9"
+                    },
+                    {
+                        "file":  "ffr_catalog.json",
+                        "destination":  "build/devui/ffr_catalog.json",
+                        "sha256":  "65c9e037325629ddded4aca88541060f794922de7311b437ae6c1eeeb50274f9"
+                    }
+                ]
+}

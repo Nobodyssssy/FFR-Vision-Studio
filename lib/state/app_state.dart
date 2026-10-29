@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import '../services/api.dart';
 import '../services/downloader.dart';
 import '../services/engine.dart';
+import '../services/engine_overlay.dart';
 import '../services/game_locator.dart';
 import '../services/paths.dart';
 import '../services/unit_assets.dart';
@@ -158,6 +159,9 @@ class AppState extends ChangeNotifier {
       if (hostIndex == null) {
         try { hostIndex = json.decode(File(p.join(paths.root, 'ffbe_index_cache.json')).readAsStringSync()) as JsonMap; } catch (_) {}
       }
+      // Apply the release-tested native table and browser fixes after downloads.
+      // This also restores them after a hosted engine pack update.
+      await EngineOverlay.apply(paths.engineDir);
       await _startEngine(bootSteps[6]);
       gameRoot ??= await GameLocator.detect();
       final st = await api!.status();
