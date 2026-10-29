@@ -1089,17 +1089,105 @@ def detail(grants):
 
 TEX_DONOR = 13110   # Cloud: single-mip BGRA8/BC5 textures, used as templates for every generated texture
 
+
 def run(cmd):
-    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
-    print((r.stdout or "").strip());
-    if r.returncode != 0: print(r.stderr); sys.exit(f"failed: {' '.join(str(c) for c in cmd[:3])}")
+    def execute(args):
+        r = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        print((r.stdout or "").strip())
+        if r.returncode != 0:
+            print(r.stderr)
+            sys.exit(
+                f"failed: {' '.join(str(c) for c in args[:3])}"
+            )
+
+    # Reuse only verified SpriteStudio and texture outputs.
+    # Game tables, timelines and audio still build normally.
+    if "make-ss6" in cmd or "make-texture" in cmd:
+        import cooked_command_cache
+
+        return cooked_command_cache.run(
+            cmd,
+            execute,
+            os.path.join(
+                BUILD,
+                "prepared-constructor-cache",
+            ),
+        )
+
+    return execute(cmd)
+
 
 def generate_sprites(u):
     """FFBE cgg/cgs -> atlas + SS6 spec -> cooked Ss6Project + textures under OUT/FFRS/Content/Chara/{summon,menu}/summon<vid>/"""
     vid, d = u["id"], u["donor"]; ff = u["ffbe"]
     work = os.path.join(ROOT, "build", "sprites", u["key"])
     base = [] if not ff.get("baseDir") or not os.path.isdir(os.path.join(ROOT, ff["baseDir"])) else ["--base", os.path.join(ROOT, ff["baseDir"]), str(ff.get("baseForm"))]
-    run(ffrenv.py(os.path.join(ROOT, "tools", "ffbe2ss6", "build_sprites.py"), os.path.join(ROOT, ff["dir"]), ff["id"], str(vid), work) + base)
+
+    from pathlib import Path
+    from PIL import __version__ as pillow_version
+    from devui import build_receipt
+
+    workdir = Path(work)
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    identity = workdir / ".atlas-identity.json"
+    identity.write_text(json.dumps({
+        "visionId": vid,
+        "ffbeForm": str(ff["id"]),
+        "baseForm": str(ff.get("baseForm")),
+        "baseAvailable": bool(base),
+        "pillowVersion": pillow_version,
+        "pythonVersion": list(sys.version_info[:3]),
+    }, sort_keys=True), encoding="utf-8")
+
+    inputs = {
+        "identity": identity,
+        "build_sprites.py": Path(ROOT) / "tools/ffbe2ss6/build_sprites.py",
+        "ffbe_frames.py": Path(ROOT) / "tools/ffbe2ss6/ffbe_frames.py",
+    }
+
+    folders = [("selected", Path(ROOT) / ff["dir"])]
+    if base:
+        folders.append(("base", Path(ROOT) / ff["baseDir"]))
+
+    for label, folder in folders:
+        if folder.is_dir():
+            for source in folder.rglob("*"):
+                if source.is_file():
+                    key = f"{label}/{source.relative_to(folder).as_posix()}"
+                    inputs[key] = source
+
+    outputs = {
+        name: workdir / name
+        for name in (
+            "battle/spec.json",
+            "battle/atlas.png",
+            "battle/tex.bgra",
+            "battle/normal.bc5",
+            "battle/mreo.bgra",
+            "menu/spec.json",
+            "menu/atlas.png",
+            "menu/tex.bgra",
+        )
+    }
+
+    receipt = workdir / ".atlas-receipt.json"
+
+    if build_receipt.reusable(receipt, inputs, outputs):
+        print(f"Reused unchanged FFBE atlases: {u['en']}", flush=True)
+    else:
+        run(ffrenv.py(
+            os.path.join(ROOT, "tools", "ffbe2ss6", "build_sprites.py"),
+            os.path.join(ROOT, ff["dir"]),
+            ff["id"], str(vid), work,
+        ) + base)
+        build_receipt.record(receipt, inputs, outputs)
+
     chara = os.path.join(LEGACY, "FFRS", "Content", "Chara")
     out_b = os.path.join(OUT, "FFRS", "Content", "Chara", "summon", f"summon{vid}"); out_m = os.path.join(OUT, "FFRS", "Content", "Chara", "menu", f"summon{vid}")
     def ss6(kind, spec, out):
