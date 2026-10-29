@@ -73,6 +73,22 @@ def export_icon(pkg, name, force=False):
         print("  icon export failed:", name, (r.stderr or r.stdout)[-200:]); return None
     return png
 
+# Full-release authority: after game extraction, never serve a shipped/demo catalog
+# when the actual game's skill or passive rows have changed.
+CATALOG_SOURCE_TABLES = (
+    "Skill/DT_SkillData", "Skill/DT_PassiveSkillData",
+    "Skill/DT_SkillEffectData", "Asset/Skill/DT_SkillAsset",
+)
+
+
+def source_stamp():
+    files = [(rel, os.path.join(ROWS, rel + ".json")) for rel in CATALOG_SOURCE_TABLES]
+    if not all(os.path.isfile(path) for _, path in files):
+        return None  # first start before game extraction: shipped catalog remains usable
+    return {rel: [os.stat(path).st_size, os.stat(path).st_mtime_ns]
+            for rel, path in files}
+
+
 def build(force_icons=False):
     loc = json.load(open(os.path.join(ROOT, "extracted", "locres_en.json"), encoding="utf-8"))
     def tx(ns, key, fallback=None):
@@ -168,6 +184,7 @@ def build(force_icons=False):
            "motions": [{"name": a, "ffbe": b} for a, b in MOTIONS], "skillMotions": SKILL_MOTIONS, "targetEffects": TARGET_EFFECTS, "enums": enums, "colorGrading": color_grading,
            "ffbeResonance": {"defaultFieldColor": "#808080", "lbProfiles": True, "audio": True},
            "unusedIconTags": [13104, 13106, 13107, 13109, 13111, 13112, 13114, 13115, 13117, 13119, 13121, 13122, 13126, 13129, 13131, 13132]}
+    cat["sourceStamp"] = source_stamp()
     os.makedirs(OUT, exist_ok=True)
     json.dump(cat, open(os.path.join(OUT, "ffr_catalog.json"), "w", encoding="utf-8"), ensure_ascii=False)
     print(f"ffr catalog: {len(skills)} skills ({sum(1 for s in skills if s['seq'])} with sequences), {len(passives)} passives, {len(effects)} effects, "
@@ -219,10 +236,12 @@ TEMPLATE_NOTES = {
 
 def load():
     p = os.path.join(OUT, "ffr_catalog.json")
-    cat = build() if not os.path.exists(p) else json.load(open(p, encoding="utf-8"))
-    if cat.get("schema") != SCHEMA:
-        try: cat = build()
-        except Exception as ex: print("catalog rebuild failed, serving the cached one:", ex)
+    cat = json.load(open(p, encoding="utf-8")) if os.path.isfile(p) else None
+    current = source_stamp()
+    if (cat is None or cat.get("schema") != SCHEMA or
+            (current is not None and cat.get("sourceStamp") != current)):
+        # Never silently return demo rows after production tables are available.
+        cat = build()
     import skill_icons
     cat['icons'] = [i for i in cat['icons'] if not i['tag'].startswith(skill_icons.PREFIX)] + skill_icons.catalog()
     aliases = skill_icons.ICONS/'aliases.json'
