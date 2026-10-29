@@ -49,8 +49,12 @@ class _AbilitiesStepState extends State<AbilitiesStep> {
       if (row.contains('敵用')) return 'enemy';
       // Many 500k+ skills are enemy actions but lack the explicit Japanese marker.
       // Keep them unclassified instead of claiming they are player abilities.
+
       if (s['id'] is num && ((s['id'] as num) >= 500000 ||
-          ((s['id'] as num) >= 300000 && (s['id'] as num) < 400000))) return 'unknown';
+          ((s['id'] as num) >= 300000 && (s['id'] as num) < 400000))) {
+        return 'unknown';
+      }
+
       final owner = (s['hasUnit'] ?? '').toString();
       if (owner.isEmpty) return 'unknown';
       return owner == 'All' ? 'general' : 'character';
