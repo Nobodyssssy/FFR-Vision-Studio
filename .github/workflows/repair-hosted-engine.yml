@@ -154,6 +154,20 @@ jobs:
               if target_dist.exists():
                   shutil.rmtree(target_dist)
               shutil.copytree(DIST, target_dist)
+                            # Bundle the verified full-release skill/passive catalog.
+              source_catalog = ROOT / 'assets' / 'ffr_catalog.json'
+              catalog = json.loads(source_catalog.read_text(encoding='utf-8'))
+
+              if (catalog.get('schema') != 9 or
+                  len(catalog.get('skills', [])) != 1167 or
+                  len(catalog.get('passives', [])) != 378):
+                  raise RuntimeError('Invalid full-release catalog')
+
+              for relative in ('data/ffr_catalog.json',
+                               'build/devui/ffr_catalog.json'):
+                  target = staged / relative
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(source_catalog, target)
               (staged / 'VERSION').write_text(f'{manifest["version"]}-source-{COMMIT}\n', encoding='utf-8')
 
               # PyInstaller's frozen module importer can shadow loose *.py
@@ -166,7 +180,7 @@ jobs:
                       '--distpath', str(freeze_root / 'dist'),
                       '--workpath', str(freeze_root / 'work'),
                       '--specpath', str(freeze_root)]
-              for pkg in ('uvicorn', 'fastapi', 'starlette', 'anyio'):
+                            for pkg in ('uvicorn', 'fastapi', 'starlette', 'anyio', 'PIL'):
                   opts += ['--collect-all', pkg]
               for pkg in ('multipart', 'PIL.WebPImagePlugin', 'sqlite3'):
                   opts += ['--hidden-import', pkg]
@@ -221,6 +235,21 @@ jobs:
                           raise RuntimeError('Engine is still missing POST /api/studio/grants. Refusing to publish.')
                       if '/api/ffr/catalog' not in spec.get('paths', {}):
                           raise RuntimeError('Engine is missing the catalog endpoint. Refusing to publish.')
+                                                # Verify the actual packaged engine serves the full catalog.
+                      with urllib.request.urlopen(
+                          f'http://127.0.0.1:{port}/api/ffr/catalog',
+                          timeout=45
+                      ) as response:
+                          served = json.load(response)
+
+                      if (served.get('schema') != 9 or
+                          len(served.get('skills', [])) != 1167 or
+                          len(served.get('passives', [])) != 378 or
+                          sum(s.get('element') == 'Dark'
+                              for s in served['skills']) != 42):
+                          raise RuntimeError(
+                              'Packaged engine returned an incomplete FFR catalog'
+                          )
                       # Exercise the route too: the deliberately unknown entry
                       # must receive a well-formed validation error (422), not
                       # 405 Method Not Allowed or a Python import crash (500).

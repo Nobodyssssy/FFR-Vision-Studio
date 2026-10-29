@@ -237,9 +237,9 @@ TEMPLATE_NOTES = {
 def load():
     p = os.path.join(OUT, "ffr_catalog.json")
     cat = json.load(open(p, encoding="utf-8")) if os.path.isfile(p) else None
-    current = source_stamp()
-    if (cat is None or cat.get("schema") != SCHEMA or
-            (current is not None and cat.get("sourceStamp") != current)):
+        if (cat is None or cat.get("schema") != SCHEMA or
+            len(cat.get("skills", [])) != 1167 or
+            len(cat.get("passives", [])) != 378):
         # Never silently return demo rows after production tables are available.
         cat = build()
     import skill_icons
