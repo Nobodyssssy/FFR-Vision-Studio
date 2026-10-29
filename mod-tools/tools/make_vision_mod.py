@@ -1089,10 +1089,38 @@ def detail(grants):
 
 TEX_DONOR = 13110   # Cloud: single-mip BGRA8/BC5 textures, used as templates for every generated texture
 
+
 def run(cmd):
-    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
-    print((r.stdout or "").strip());
-    if r.returncode != 0: print(r.stderr); sys.exit(f"failed: {' '.join(str(c) for c in cmd[:3])}")
+    def execute(args):
+        r = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        print((r.stdout or "").strip())
+        if r.returncode != 0:
+            print(r.stderr)
+            sys.exit(
+                f"failed: {' '.join(str(c) for c in args[:3])}"
+            )
+
+    # Reuse only verified SpriteStudio and texture outputs.
+    # Game tables, timelines and audio still build normally.
+    if "make-ss6" in cmd or "make-texture" in cmd:
+        import cooked_command_cache
+
+        return cooked_command_cache.run(
+            cmd,
+            execute,
+            os.path.join(
+                BUILD,
+                "prepared-constructor-cache",
+            ),
+        )
+
+    return execute(cmd)
+
 
 def generate_sprites(u):
     """FFBE cgg/cgs -> atlas + SS6 spec -> cooked Ss6Project + textures under OUT/FFRS/Content/Chara/{summon,menu}/summon<vid>/"""
