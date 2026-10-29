@@ -1,0 +1,284 @@
+name: Repair hosted FFR engine
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repair-engine:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out current Studio source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mod-tools/tools/devui/web/package-lock.json
+
+      - name: Set up Python for the packaged engine
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: mod-tools/requirements-dev.txt
+
+      - name: Install the frozen-engine build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install -r mod-tools/requirements.txt "PyInstaller==6.22.2"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build the updated Advanced Studio browser interface
+        working-directory: mod-tools/tools/devui/web
+        shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Repackage the published engine with current source and verify its API
+        shell: python {0}
+        run: |
+          import copy
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import tempfile
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          import zipfile
+
+          HOST = 'https://ffbe.luminest.io/'
+          ENGINE_HOST = 'https://ffr.luminest.io/'
+          ROOT = Path.cwd()
+          SCRIPTS = ROOT / 'mod-tools' / 'tools'
+          DIST = SCRIPTS / 'devui' / 'web' / 'dist'
+          OUT = ROOT / 'deploy-ready'
+          COMMIT = os.environ['GITHUB_SHA'][:12]
+          OFFLINE = {'convert_ffbe_effects.py', 'convert_all_ffbe_animations.py', 'recover_ffbe_animations.py'}
+          SUBDIRS = ('devui', 'ability_converter', 'effect_review', 'ffbe2ss6', 'scripts')
+
+          def get(url, path=None):
+              error = None
+              for attempt in range(3):
+                  try:
+                      request = urllib.request.Request(url, headers={'User-Agent': 'FFR-Vision-Studio-GitHub-Actions'})
+                      with urllib.request.urlopen(request, timeout=80) as response:
+                          if path:
+                              with open(path, 'wb') as sink:
+                                  shutil.copyfileobj(response, sink)
+                              return None
+                          return response.read()
+                  except Exception as exc:
+                      error = exc
+                      time.sleep(2 ** attempt)
+              raise RuntimeError(f'Could not download {url}: {error}')
+
+          def digest(path):
+              h = hashlib.sha256()
+              with open(path, 'rb') as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          # The existing published engine includes PyInstaller, retoc, repak and
+          # other native dependencies. Never attempt to reconstruct them from
+          # Python source or copy private game assets into GitHub Actions.
+          manifest = json.loads(get(urllib.parse.urljoin(HOST, 'manifest.json')))
+          old = manifest['packs']['engine']
+          engine_url = urllib.parse.urljoin(HOST, old['url'])
+          with tempfile.TemporaryDirectory(prefix='ffr-engine-') as tmp:
+              temp = Path(tmp)
+              previous = temp / 'previous-engine.zip'
+              get(engine_url, previous)
+              if digest(previous) != old['sha256']:
+                  raise RuntimeError('Published engine SHA-256 does not match the hosting manifest. Stopping.')
+              if previous.stat().st_size != old['size']:
+                  raise RuntimeError('Published engine size does not match the hosting manifest. Stopping.')
+
+              staged = temp / 'engine'
+              staged.mkdir()
+              with zipfile.ZipFile(previous) as archive:
+                  for item in archive.infolist():
+                      rel = Path(item.filename.replace('\\', '/'))
+                      if rel.is_absolute() or '..' in rel.parts or ':' in str(rel):
+                          raise RuntimeError(f'Unsafe archive entry: {item.filename}')
+                  archive.extractall(staged)
+              exe = staged / 'FFR Vision Studio Engine.exe'
+              if not exe.is_file() or not (staged / 'tools' / 'devui' / 'server.py').is_file():
+                  raise RuntimeError('Published engine has an unexpected ZIP layout. No changes published.')
+
+              # Replace the Python source loaded dynamically by launcher.py;
+              # preserve the frozen Python runtime, native tools, installed game
+              # tables, user units and all downloaded data packs.
+              count = 0
+              for path in SCRIPTS.glob('*.py'):
+                  if path.name in OFFLINE:
+                      continue
+                  target = staged / 'tools' / path.name
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(path, target)
+                  count += 1
+              for sub in SUBDIRS:
+                  source_dir = SCRIPTS / sub
+                  if not source_dir.is_dir():
+                      raise RuntimeError(f'Missing source folder {source_dir}')
+                  for path in source_dir.rglob('*.py'):
+                      if '__pycache__' in path.parts:
+                          continue
+                      rel = path.relative_to(SCRIPTS)
+                      target = staged / 'tools' / rel
+                      target.parent.mkdir(parents=True, exist_ok=True)
+                      shutil.copy2(path, target)
+                      count += 1
+              if not (staged / 'tools' / 'devui' / 'studio_grants.py').is_file():
+                  raise RuntimeError('The modern grant handler is missing.')
+              server = (staged / 'tools' / 'devui' / 'server.py').read_text(encoding='utf-8')
+              if "@app.post('/api/studio/grants')" not in server:
+                  raise RuntimeError('New source does not define POST /api/studio/grants.')
+              if not (DIST / 'index.html').is_file():
+                  raise RuntimeError('New Advanced Studio was not built.')
+              target_dist = staged / 'tools' / 'devui' / 'web' / 'dist'
+              if target_dist.exists():
+                  shutil.rmtree(target_dist)
+              shutil.copytree(DIST, target_dist)
+              (staged / 'VERSION').write_text(f'{manifest["version"]}-source-{COMMIT}\n', encoding='utf-8')
+
+              # PyInstaller's frozen module importer can shadow loose *.py
+              # files! Rebuild the executable AND its _internal runtime from
+              # this checkout, otherwise the old API can still return 405.
+              import sys
+              freeze_root = temp / 'frozen'
+              opts = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
+                      '--onedir', '--name', 'FFR Vision Studio Engine',
+                      '--distpath', str(freeze_root / 'dist'),
+                      '--workpath', str(freeze_root / 'work'),
+                      '--specpath', str(freeze_root)]
+              for pkg in ('uvicorn', 'fastapi', 'starlette', 'anyio'):
+                  opts += ['--collect-all', pkg]
+              for pkg in ('multipart', 'PIL.WebPImagePlugin', 'sqlite3'):
+                  opts += ['--hidden-import', pkg]
+              excluded = set(OFFLINE)
+              excluded.update({'catalog', 'export_ability', 'flipbook', 'hca_transcode', 'ibmb',
+                               'layer_spec', 'make_gif', 'prepare_vision', 'preview_anim',
+                               'preview_ss6', 'render', 'scene', 'screen_adapter',
+                               'source_placement', 'host_coordinates', 'catalog_coverage',
+                               'catalog_batch', 'to_ss6', 'uv_sampling', 'prepared_reuse',
+                               'atomic_files', 'shared_delivery', 'regional_assets'})
+              for module in sorted(excluded):
+                  if module.endswith('.py'):
+                      module = module[:-3]
+                  opts += ['--exclude-module', module]
+                  if module not in (name[:-3] for name in OFFLINE):
+                      opts += ['--exclude-module', 'ffbe_effects.' + module]
+              opts.append(str(SCRIPTS / 'devui' / 'launcher.py'))
+              subprocess.run(opts, cwd=SCRIPTS.parent, check=True)
+              frozen = freeze_root / 'dist' / 'FFR Vision Studio Engine'
+              if not (frozen / 'FFR Vision Studio Engine.exe').is_file() or not (frozen / '_internal').is_dir():
+                  raise RuntimeError('PyInstaller finished without a complete engine runtime')
+              shutil.copy2(frozen / 'FFR Vision Studio Engine.exe', exe)
+              if (staged / '_internal').exists():
+                  shutil.rmtree(staged / '_internal')
+              shutil.copytree(frozen / '_internal', staged / '_internal')
+
+              # Startup smoke test: verify the ACTUAL packaged Engine.exe serves
+              # the new POST route, rather than merely grepping its source.
+              # This test does not claim that mod building or animation works.
+              port = 18947
+              log_path = temp / 'engine-smoke.log'
+              with log_path.open('w', encoding='utf-8') as log:
+                  proc = subprocess.Popen([str(exe), '--engine', '--port', str(port), '--no-browser'],
+                                          cwd=staged, stdout=log, stderr=subprocess.STDOUT)
+                  try:
+                      spec = None
+                      for _ in range(35):
+                          if proc.poll() is not None:
+                              break
+                          try:
+                              with urllib.request.urlopen(f'http://127.0.0.1:{port}/openapi.json', timeout=2) as response:
+                                  spec = json.load(response)
+                              break
+                          except Exception:
+                              time.sleep(1)
+                      if spec is None:
+                          log.flush()
+                          detail = log_path.read_text(encoding='utf-8', errors='replace')[-4000:]
+                          raise RuntimeError('Updated engine did not start; no deployable file produced. Log: ' + detail)
+                      grants = spec.get('paths', {}).get('/api/studio/grants', {})
+                      if 'post' not in grants:
+                          raise RuntimeError('Engine is still missing POST /api/studio/grants. Refusing to publish.')
+                      if '/api/ffr/catalog' not in spec.get('paths', {}):
+                          raise RuntimeError('Engine is missing the catalog endpoint. Refusing to publish.')
+                      # Exercise the route too: the deliberately unknown entry
+                      # must receive a well-formed validation error (422), not
+                      # 405 Method Not Allowed or a Python import crash (500).
+                      payload = json.dumps({'unit': {'ffbeLibrary': []}, 'action': 'info',
+                                            'ref': {'sourceKey': '__not_a_real_skill__'}}).encode()
+                      request = urllib.request.Request(
+                          f'http://127.0.0.1:{port}/api/studio/grants', data=payload,
+                          headers={'Content-Type': 'application/json'}, method='POST')
+                      try:
+                          with urllib.request.urlopen(request, timeout=30) as response:
+                              status = response.status
+                      except urllib.error.HTTPError as exc:
+                          status = exc.code
+                          if status != 422:
+                              raise RuntimeError(f'Grant handler returned {status}: {exc.read()[:1000]!r}') from exc
+                      if status != 422:
+                          raise RuntimeError(f'Grant handler returned {status}, expected HTTP 422 for an unknown skill.')
+                  finally:
+                      proc.terminate()
+                      try:
+                          proc.wait(timeout=8)
+                      except subprocess.TimeoutExpired:
+                          proc.kill()
+                          proc.wait()
+              print(f'PASS: packaged engine has POST /api/studio/grants; {count} source files updated')
+
+              out_engine = OUT / 'engine'
+              out_engine.mkdir(parents=True, exist_ok=True)
+              filename = f'engine-source-{COMMIT}.zip'
+              zip_path = out_engine / filename
+              with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as archive:
+                  for path in sorted(staged.rglob('*')):
+                      if path.is_file():
+                          archive.write(path, path.relative_to(staged).as_posix())
+              assert zipfile.ZipFile(zip_path).testzip() is None
+              output_manifest = copy.deepcopy(manifest)
+              output_manifest['packs']['engine']['url'] = urllib.parse.urljoin(ENGINE_HOST, 'engine/' + filename)
+              output_manifest['packs']['engine']['sha256'] = digest(zip_path)
+              output_manifest['packs']['engine']['size'] = zip_path.stat().st_size
+              output_manifest['packs']['engine']['version'] = f'{manifest["version"]}-source-{COMMIT}'
+              # DO NOT change manifest.version or minApp: this is a hotfix of
+              # engine code, NOT a new incompatible Flutter application release.
+              (OUT / 'manifest.json').write_text(json.dumps(output_manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+              (OUT / 'DEPLOY.txt').write_text(
+                  f'1. Upload engine/{filename} to https://ffr.luminest.io/engine/{filename}\n'
+                  f'2. AFTER that URL works, replace https://ffbe.luminest.io/manifest.json with this manifest.json.\n'
+                  '3. Keep every other hosted asset, ZIP, icon, sprite and data file unchanged.\n'
+                  '4. Restart Studio. The app detects the new engine SHA-256 and downloads it.\n'
+                  '5. Verify skill details work and Advanced Studio shows the complete native catalog.\n'
+                  'No game assets were extracted; this cannot certify original FFBE effects/audio.\n',
+                  encoding='utf-8')
+              print('READY: ' + str(zip_path))
+              print('READY: ' + str(OUT / 'manifest.json'))
+
+      - name: Downloadable deployment bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: FFR-updated-engine-and-manifest
+          path: deploy-ready/
+          if-no-files-found: error
+          retention-days: 7
