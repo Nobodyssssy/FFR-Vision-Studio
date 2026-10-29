@@ -10,7 +10,7 @@ import threading
 import time
 import uuid
 from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 import zipfile
 
@@ -83,6 +83,8 @@ def download(info, target, report):
         try:
             with urlopen(Request(url, headers=headers), timeout=45) as response:
                 status = response.status
+                if status is None and urlsplit(url).scheme == "file":
+                    status = 200
 
                 if offset and status == 206:
                     match = re.fullmatch(
