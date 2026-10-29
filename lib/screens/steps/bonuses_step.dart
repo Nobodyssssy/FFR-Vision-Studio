@@ -17,7 +17,7 @@ class BonusesStep extends StatefulWidget {
 }
 
 class _BonusesStepState extends State<BonusesStep> {
-  String q = '', group = 'native';
+  String q = '', group = 'ffr', sourceFilter = 'all', learnedFilter = 'all';
   final amounts = <int, int>{for (final p in statParams) p.$1: p.$3};
   @override
   Widget build(BuildContext context) {
@@ -28,8 +28,12 @@ class _BonusesStepState extends State<BonusesStep> {
     final query = q.trim().toLowerCase();
     bool matches(Map r) => '${r['name']} ${r['description'] ?? r['desc'] ?? ''}'.toLowerCase().contains(query);
     final natives = (group == 'native' || group == 'all') ? nativeEntries(unit).where((e) => e['kind'] == 'PASSIVE' && matches(e)).toList() : <Map<String, dynamic>>[];
-    final shown = (group == 'ffr' || group == 'all') ? passives.where(matches).toList() : <Map<String, dynamic>>[];
     final granted = {for (final t in aw) for (final g in t) if (g[0] == 'PassiveSkill') g[1]};
+    bool enemyUse(Map p) => (p['row'] ?? '').toString().contains('敵用');
+    final shown = (group == 'ffr' || group == 'all') ? passives.where((p) =>
+        matches(p) &&
+        (sourceFilter == 'all' || (sourceFilter == 'enemy' ? enemyUse(p) : !enemyUse(p))) &&
+        (learnedFilter == 'all' || (learnedFilter == 'learned' ? granted.contains(p['id']) : !granted.contains(p['id'])))).toList() : <Map<String, dynamic>>[];
     void add(int tier, int index, DragPayload payload) {
       if (payload.kind != 'grant') return;
       final grant = List<dynamic>.from(payload.value as List);
@@ -46,12 +50,28 @@ class _BonusesStepState extends State<BonusesStep> {
             items: [for (final e in {'native': 'Native Bonuses', 'all': 'All bonuses', 'ffr': 'FFR bonuses', 'stats': 'Stat bonuses'}.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
             onChanged: (v) => setState(() => group = v ?? 'native'))),
         ])),
+        if (group == 'ffr' || group == 'all')
+          Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10), child: Row(children: [
+            Expanded(child: DropdownButton<String>(value: sourceFilter, isExpanded: true, style: Guide.text(), dropdownColor: Guide.paper,
+              items: const <DropdownMenuItem<String>>[
+                DropdownMenuItem(value: 'all', child: Text('All sources', overflow: TextOverflow.ellipsis)),
+                DropdownMenuItem(value: 'enemy', child: Text('Enemy-use', overflow: TextOverflow.ellipsis)),
+                DropdownMenuItem(value: 'other', child: Text('Other / unspecified', overflow: TextOverflow.ellipsis)),
+              ], onChanged: (v) => setState(() => sourceFilter = v ?? 'all'))),
+            const SizedBox(width: 8),
+            Expanded(child: DropdownButton<String>(value: learnedFilter, isExpanded: true, style: Guide.text(), dropdownColor: Guide.paper,
+              items: const <DropdownMenuItem<String>>[
+                DropdownMenuItem(value: 'all', child: Text('All bonuses', overflow: TextOverflow.ellipsis)),
+                DropdownMenuItem(value: 'learned', child: Text('Learned', overflow: TextOverflow.ellipsis)),
+                DropdownMenuItem(value: 'notlearned', child: Text('Not learned', overflow: TextOverflow.ellipsis)),
+              ], onChanged: (v) => setState(() => learnedFilter = v ?? 'all'))),
+          ])),
         Expanded(child: ListView(padding: const EdgeInsets.fromLTRB(12, 0, 12, 12), children: [
           if (natives.isEmpty && shown.isEmpty && group != 'stats' && group != 'all') Padding(padding: const EdgeInsets.all(16), child: Text(query.isEmpty && group == 'native' ? 'This vision has no native bonuses.' : 'No matching bonuses.', style: Guide.small())),
           for (final (i, entry) in natives.indexed) NativeLibraryRow(key: ValueKey(entry['sourceKey']), unit: unit, entry: entry, set: widget.set, zebra: i.isOdd),
           for (final (i, row) in shown.indexed) Builder(builder: (_) {
             final data = grantData(unit, cat, {'kind': 'PassiveSkill', 'id': row['id']});
-            return LibraryRow(title: data.name, detail: '${data.description} · ${data.cost} SP', zebra: i.isOdd,
+            return LibraryRow(title: data.name, detail: '${data.description} · ${data.cost} SP${enemyUse(row) ? ' · Enemy-use' : ''}', zebra: i.isOdd,
               icon: GrantIcon(data: data, api: app.api!, catalog: cat), payload: DragPayload('grant', ['PassiveSkill', row['id']]), done: granted.contains(row['id']),
               onInfo: () => showGrantInfo(context, unit, data), onAdd: (t) => add(t, aw[t].length, DragPayload('grant', ['PassiveSkill', row['id']])));
           }),

@@ -150,11 +150,11 @@ expect(find.text('FFR abilities'), findsOneWidget);
               child: bonuses ? BonusesStep(key: ValueKey('$dark-$width-b'), unit: unit, set: (patch) => state(() => unit = {...unit, ...patch}))
                 : AbilitiesStep(key: ValueKey('$dark-$width-a'), unit: unit, set: (patch) => state(() => unit = {...unit, ...patch})))))))));
           await tester.pumpAndSettle();
-expect(find.text(bonuses ? 'Native Bonuses' : 'FFR abilities'), findsOneWidget);
+          expect(find.text(bonuses ? 'FFR bonuses' : 'FFR abilities'), findsOneWidget);
           expect(find.descendant(of: find.byType(LearnedTiers), matching: find.text('Falling Slash')), findsOneWidget);
           expect(find.descendant(of: find.byType(LearnedTiers), matching: find.text('Brave Heart')), findsOneWidget);
           if (bonuses) {
-            await tester.tap(find.byType(DropdownButton<String>)); await tester.pumpAndSettle();
+            await tester.tap(find.byType(DropdownButton<String>).first); await tester.pumpAndSettle();
             await tester.tap(find.text('Stat bonuses').last); await tester.pumpAndSettle();
             final label = tester.widget<Text>(find.text('Intelligence'));
             final ink = Guide.ink;
