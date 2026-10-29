@@ -82,6 +82,44 @@ class AppState extends ChangeNotifier {
   String get logsDir => p.join(paths.root, 'logs');
   String get downloadPage => hostBase.endsWith('/') ? hostBase : '$hostBase/';
 
+  Future<void> _restoreFullReleaseCatalog() async {
+  final source = await rootBundle.loadString('assets/ffr_catalog.json');
+  final catalog = jsonDecode(source) as Map<String, dynamic>;
+
+  if (catalog['schema'] != 9 ||
+      catalog['skills'] is! List ||
+      (catalog['skills'] as List).length != 1167 ||
+      catalog['passives'] is! List ||
+      (catalog['passives'] as List).length != 378) {
+    throw StateError('Bundled full-release FFR catalog is invalid.');
+  }
+
+  final targets = [
+    p.join(paths.engineData, 'ffr_catalog.json'),
+    p.join(paths.engineDir, 'build', 'devui', 'ffr_catalog.json'),
+  ];
+
+  for (final target in targets) {
+    final file = File(target);
+
+    if (await file.exists()) {
+      try {
+        final existing =
+            jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+        if (existing['schema'] == 9 &&
+            existing['skills'] is List &&
+            existing['passives'] is List &&
+            (existing['skills'] as List).length >= 1167 &&
+            (existing['passives'] as List).length >= 378) {
+          continue;
+        }
+      } catch (_) {}
+    }
+
+    await file.parent.create(recursive: true);
+    await file.writeAsString(source, flush: true);
+  }
+}
   // ---------------------------------------------------------------- boot
   Future<void> boot() async {
     try {
@@ -159,7 +197,8 @@ class AppState extends ChangeNotifier {
       if (hostIndex == null) {
         try { hostIndex = json.decode(File(p.join(paths.root, 'ffbe_index_cache.json')).readAsStringSync()) as JsonMap; } catch (_) {}
       }
-      await _startEngine(bootSteps[6]);
+     await _restoreFullReleaseCatalog();
+     await _startEngine(bootSteps[6]);
       gameRoot ??= await GameLocator.detect();
       final st = await api!.status();
       phase = (st['setupNeeded'] == true) ? Phase.setup : Phase.ready;
